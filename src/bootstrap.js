@@ -5,6 +5,16 @@ const path = require('path');
 const mime = require('mime-types');
 const { categories, authors, articles, global, about } = require('../data/data.json');
 
+// Outcome of the example-data import, so a partial import is reported instead of
+// being silently presented as a success.
+const importStats = { imported: 0, failures: [] };
+
+// A stable, human-meaningful identifier for a seed entry, used to attribute an
+// import failure to a specific record.
+function entryIdentifier(entry) {
+  return entry.slug || entry.name || entry.title || entry.siteName || 'unknown';
+}
+
 async function seedExampleApp() {
   const shouldImportSeedData = await isFirstRun();
 
@@ -12,9 +22,28 @@ async function seedExampleApp() {
     try {
       console.log('Setting up the template...');
       await importSeedData();
-      console.log('Ready to go');
+
+      if (importStats.failures.length === 0) {
+        strapi.log.info('Seed data import completed', {
+          imported: importStats.imported,
+          failed: 0,
+        });
+        console.log('Ready to go');
+      } else {
+        strapi.log.error('Seed data import completed with failures', {
+          imported: importStats.imported,
+          failed: importStats.failures.length,
+          failures: importStats.failures,
+        });
+        console.log(
+          `Seed data import finished with ${importStats.failures.length} failures. See the error logs above.`
+        );
+      }
     } catch (error) {
-      console.log('Could not import seed data');
+      strapi.log.error('Seed data import failed', {
+        imported: importStats.imported,
+        err: error.message,
+      });
       console.error(error);
     }
   } else {
@@ -104,8 +133,15 @@ async function createEntry({ model, entry }) {
     await strapi.documents(`api::${model}.${model}`).create({
       data: entry,
     });
+    importStats.imported += 1;
   } catch (error) {
-    console.error({ model, entry, error });
+    const identifier = entryIdentifier(entry);
+    importStats.failures.push({ model, identifier, error: error.message });
+    strapi.log.error('Seed entry import failed', {
+      model,
+      identifier,
+      err: error.message,
+    });
   }
 }
 
